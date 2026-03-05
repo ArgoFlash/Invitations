@@ -22,13 +22,32 @@ const client = new Client({
 
 const guildInvites = new Collection();
 
-async function cacheGuildInvites(guild) {
+async function syncGuildInvites(guild) {
   try {
     const invites = await guild.invites.fetch();
     guildInvites.set(
       guild.id,
       new Collection(invites.map(inv => [inv.code, inv.uses])),
     );
+
+    const members = await guild.members.fetch();
+    const nonBotCount = members.filter(m => !m.user.bot).size;
+
+    const inviterMap = new Map();
+    for (const inv of invites.values()) {
+      if (!inv.inviter || inv.uses === 0) continue;
+      const id = inv.inviter.id;
+      const prev = inviterMap.get(id) ?? { total: 0 };
+      prev.total += inv.uses;
+      inviterMap.set(id, prev);
+    }
+
+    for (const [inviterId, data] of inviterMap) {
+      const active = Math.min(data.total, nonBotCount);
+      upsertInvites(guild.id, inviterId, data.total, active);
+    }
+
+    console.log(`[${guild.name}] ${inviterMap.size} inviter(s) synchronisé(s)`);
   } catch (err) {
     console.error(`Impossible de récupérer les invites pour ${guild.name}:`, err.message);
   }
@@ -38,7 +57,7 @@ client.once(Events.ClientReady, async () => {
   console.log(`Connecté en tant que ${client.user.tag}`);
 
   for (const [, guild] of client.guilds.cache) {
-    await cacheGuildInvites(guild);
+    await syncGuildInvites(guild);
   }
   console.log(`Cache d'invites initialisé pour ${guildInvites.size} serveur(s)`);
 });
