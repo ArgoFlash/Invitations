@@ -17,8 +17,12 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildInvites,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
   ],
 });
+
+const PREFIX = '?';
 
 const guildInvites = new Collection();
 
@@ -138,6 +142,80 @@ client.on(Events.GuildMemberRemove, async member => {
     }
   } catch (err) {
     console.error('Erreur lors de la mise à jour après départ:', err.message);
+  }
+});
+
+client.on(Events.MessageCreate, async message => {
+  if (message.author.bot || !message.content.startsWith(PREFIX)) return;
+
+  const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
+  const command = args.shift().toLowerCase();
+  const guildId = message.guildId;
+
+  if (!guildId) return;
+
+  try {
+    if (command === 'leaderboard') {
+      const limit = Math.min(25, Math.max(1, parseInt(args[0]) || 10));
+      const { getLeaderboard } = require('./src/db');
+      const rows = getLeaderboard(guildId, limit);
+
+      if (!rows.length) {
+        return message.reply('Aucune donnée d\'invites pour le moment.');
+      }
+
+      const MEDALS = ['🥇', '🥈', '🥉'];
+      const lines = rows.map((r, i) => {
+        const rank = MEDALS[i] ?? `**${i + 1}.**`;
+        return `${rank} <@${r.userId}> — total **${r.total}**, actifs **${r.active}**`;
+      });
+
+      const { EmbedBuilder } = require('discord.js');
+      const embed = new EmbedBuilder()
+        .setTitle(`🏆 Top ${rows.length} inviters`)
+        .setDescription(lines.join('\n'))
+        .setColor(0xF1C40F)
+        .setTimestamp();
+
+      return message.reply({ embeds: [embed] });
+
+    } else if (command === 'topinviter') {
+      const { getTopInviter } = require('./src/db');
+      const top = getTopInviter(guildId);
+
+      if (!top) {
+        return message.reply('Aucune donnée d\'invites pour le moment.');
+      }
+
+      const { EmbedBuilder } = require('discord.js');
+      const embed = new EmbedBuilder()
+        .setTitle('👑 Meilleur inviter')
+        .setDescription(`🥇 <@${top.userId}> — total **${top.total}**, actifs **${top.active}**`)
+        .setColor(0xE67E22)
+        .setTimestamp();
+
+      return message.reply({ embeds: [embed] });
+
+    } else if (command === 'invites') {
+      const { getUserInvites } = require('./src/db');
+      const data = getUserInvites(guildId, message.author.id);
+
+      if (!data) {
+        return message.reply('Tu n\'as encore aucune invitation enregistrée.');
+      }
+
+      const { EmbedBuilder } = require('discord.js');
+      const embed = new EmbedBuilder()
+        .setTitle('📩 Tes invitations')
+        .setDescription(`Total : **${data.total}**\nActifs : **${data.active}**`)
+        .setColor(0x3498DB)
+        .setTimestamp();
+
+      return message.reply({ embeds: [embed] });
+    }
+  } catch (err) {
+    console.error(`Erreur commande ?${command}:`, err);
+    message.reply('Une erreur est survenue.');
   }
 });
 
